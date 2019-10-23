@@ -94,8 +94,10 @@ def basic_features(filename):
     result['Mean backward packets'] = back_bytes / back_count
     std_for, std_back, tot_var = get_variance(result['Mean forward packets'], result['Mean backward packets'],
                                               result['Mean packet size'], filename)
-    result['STD forward packets'] = sqrt(std_for / (for_count - 1))
-    result['STD forward packets'] = sqrt(std_back / (back_count - 1))
+    if for_count > 1:
+        result['STD forward packets'] = sqrt(std_for / (for_count - 1))
+    if back_count > 1:
+        result['STD forward packets'] = sqrt(std_back / (back_count - 1))
     return result
 
 
@@ -110,8 +112,7 @@ def get_interarrival_times(filename):
             continue
         if timestamp == 0:
             src = ip_packet.src
-        print(pkt_metadata)
-        timestamp = pkt_metadata.sec+pkt_metadata.usec**-6
+        timestamp = pkt_metadata.sec+pkt_metadata.usec*10**-6
         if ip_packet.src == src:
             if count == 0:
                 for_time = timestamp
@@ -132,21 +133,23 @@ def get_interarrival_times(filename):
 
 def timing_features(filename, result):
     for_times, back_times = get_interarrival_times(filename)
-    print(for_times)
+    print(back_times)
     result['Mean forward inter arrival time difference'] = sum(for_times) / len(for_times)
     result['Mean backward inter arrival time difference'] = sum(back_times) / len(back_times)
     result['Min forward inter arrival time difference'] = min(back_times)
     result['Min backward inter arrival time difference'] = min(back_times)
     result['Max forward inter arrival time difference'] = max(for_times)
     result['Max backward inter arrival time difference'] = max(back_times)
-    result['STD forward inter arrival time difference'] = stdev(for_times)
-    result['STD backward inter arrival time difference'] = stdev(back_times)
+    if len(for_times) > 1:
+        result['STD forward inter arrival time difference'] = stdev(for_times)
+    if len(back_times) > 1:
+        result['STD backward inter arrival time difference'] = stdev(back_times)
     return result
 
 
 def extract_pcap(filename):
     result = basic_features(filename)
-    return (timing_features(filename, result))
+    return timing_features(filename, result)
 
 
 def extract_pcaps(directory_name, label):
@@ -162,11 +165,10 @@ def extract_pcaps(directory_name, label):
 
     for filename in os.listdir(directory_name):
         if filename.endswith('.pcap'):
-            new_row = extract_pcap(os.path.join(directory_name, filename), feature_names)
+            new_row = extract_pcap(os.path.join(directory_name, filename))
             new_row['Label'] = label
-            df = df.append(new_row)
+            df = df.append(new_row, ignore_index=True)
     df.to_csv(label+'.csv')
 
 
-test = extract_pcap('test.pcap')
-print(test)
+#extract_pcaps('attack_packet/hancitor', 'bad')
