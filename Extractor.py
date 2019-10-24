@@ -77,6 +77,9 @@ def basic_features(filename):
             ttl += ip_packet.ttl
             back_count += 1
             back_bytes += packet_len
+    # Somethings broke
+    if back_count + for_count <= 0:
+        return result
     result['# forward packets'] = for_count
     result['# backward packets'] = back_count
     result['# forward total bytes'] = for_bytes
@@ -89,11 +92,16 @@ def basic_features(filename):
     result['Minimum backward packet'] = min_back
     result['Maximum forward packet'] = max_for
     result['Maximum backward packet'] = max_back
-    result['Mean backward TTL value'] = ttl / back_count
     result['Mean forward packets'] = for_bytes / for_count
-    result['Mean backward packets'] = back_bytes / back_count
-    std_for, std_back, tot_var = get_variance(result['Mean forward packets'], result['Mean backward packets'],
-                                              result['Mean packet size'], filename)
+    if back_count > 0:
+        result['Mean backward TTL value'] = ttl / back_count
+        result['Mean backward packets'] = back_bytes / back_count
+        std_for, std_back, tot_var = get_variance(result['Mean forward packets'], result['Mean backward packets'],
+                                                  result['Mean packet size'], filename)
+    else:
+        std_for, std_back, tot_var = get_variance(result['Mean forward packets'], 0, result['Mean packet size'],
+                                                  filename)
+
     if for_count > 1:
         result['STD forward packets'] = sqrt(std_for / (for_count - 1))
     if back_count > 1:
@@ -112,11 +120,10 @@ def get_interarrival_times(filename):
             continue
         if timestamp == 0:
             src = ip_packet.src
-        timestamp = pkt_metadata.sec+pkt_metadata.usec*10**-6
+        timestamp = pkt_metadata.sec + pkt_metadata.usec * 10 ** -6
         if ip_packet.src == src:
             if count == 0:
                 for_time = timestamp
-                time_offset = timestamp
                 continue
             tot_for_time.append(timestamp - for_time)
             for_time = timestamp
@@ -133,13 +140,15 @@ def get_interarrival_times(filename):
 
 def timing_features(filename, result):
     for_times, back_times = get_interarrival_times(filename)
-    print(back_times)
-    result['Mean forward inter arrival time difference'] = sum(for_times) / len(for_times)
-    result['Mean backward inter arrival time difference'] = sum(back_times) / len(back_times)
-    result['Min forward inter arrival time difference'] = min(back_times)
-    result['Min backward inter arrival time difference'] = min(back_times)
-    result['Max forward inter arrival time difference'] = max(for_times)
-    result['Max backward inter arrival time difference'] = max(back_times)
+    # print(back_times)
+    if len(for_times) > 0:
+        result['Mean forward inter arrival time difference'] = sum(for_times) / len(for_times)
+        result['Min forward inter arrival time difference'] = min(for_times)
+        result['Max forward inter arrival time difference'] = max(for_times)
+    if len(back_times) > 0:
+        result['Mean backward inter arrival time difference'] = sum(back_times) / len(back_times)
+        result['Min backward inter arrival time difference'] = min(back_times)
+        result['Max backward inter arrival time difference'] = max(back_times)
     if len(for_times) > 1:
         result['STD forward inter arrival time difference'] = stdev(for_times)
     if len(back_times) > 1:
@@ -168,7 +177,7 @@ def extract_pcaps(directory_name, label):
             new_row = extract_pcap(os.path.join(directory_name, filename))
             new_row['Label'] = label
             df = df.append(new_row, ignore_index=True)
-    df.to_csv(label+'.csv')
+    df.to_csv(label + '.csv')
 
 
-#extract_pcaps('attack_packet/hancitor', 'bad')
+#extract_pcaps('C:\\Users\\Scotty\\Desktop\\SplitCap_2-1\\normal', 'normal')
