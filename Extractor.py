@@ -1,10 +1,10 @@
 from scapy.utils import RawPcapReader
 from scapy.layers.l2 import Ether
 from scapy.layers.inet import IP, TCP
-from math import sqrt
 import os
 import pandas as pd
 from statistics import stdev
+from statistics import mean
 
 
 def get_variance(for_mean, back_mean, tot_mean, filename):
@@ -46,66 +46,50 @@ def get_ip(pkt_data):
 
 def basic_features(filename):
     result = dict()
-    tot_count, for_count, back_count, for_bytes, back_bytes = 0, 0, 0, 0, 0
-    min_for, min_back, max_for, max_back, ttl = 0, 0, 0, 0, 0
+    for_bytes, back_bytes = [], []
+    ttl = []
     src = ''
     for (pkt_data, pkt_metadata,) in RawPcapReader(filename):
         ip_packet = get_ip(pkt_data)
         if ip_packet is None:
             continue
         # Set soucre and dst for forwards and backwards features
-        if tot_count == 0:
+        if len(for_bytes) == 0:
             src = ip_packet.src
-        tot_count += 1
         packet_len = len(ip_packet[TCP])
 
         # Forward packet features
         if ip_packet.src == src:
-            if packet_len < min_for or for_count == 0:
-                min_for = packet_len
-            if packet_len > max_for or for_count == 0:
-                max_back = packet_len
-            for_count += 1
-            for_bytes += packet_len
+            for_bytes.append(packet_len)
 
         # Backward Packet Features
         else:
-            if packet_len < min_back or back_count == 0:
-                min_back = packet_len
-            if packet_len > max_back or back_count == 0:
-                max_back = packet_len
-            ttl += ip_packet.ttl
-            back_count += 1
-            back_bytes += packet_len
+            back_bytes.append(packet_len)
+            ttl.append(ip_packet.ttl)
     # Somethings broke
-    if back_count + for_count <= 0:
+    if len(back_bytes) + len(for_bytes) <= 0:
         return result
-    result['# forward packets'] = for_count
-    result['# backward packets'] = back_count
-    result['# forward total bytes'] = for_bytes
-    result['# backward total bytes'] = back_bytes
-    result['# Total packets'] = for_count + back_count
-    result['Mean packet size'] = (for_bytes + back_bytes) / (for_count + back_count)
-    result['Minimum packet size'] = min_back if min_back < min_for else min_for
-    result['Maximum packet size'] = max_back if max_back > max_for else max_for
-    result['Minimum forward packet'] = min_for
-    result['Minimum backward packet'] = min_back
-    result['Maximum forward packet'] = max_for
-    result['Maximum backward packet'] = max_back
-    result['Mean forward packets'] = for_bytes / for_count
-    if back_count > 0:
-        result['Mean backward TTL value'] = ttl / back_count
-        result['Mean backward packets'] = back_bytes / back_count
-        std_for, std_back, tot_var = get_variance(result['Mean forward packets'], result['Mean backward packets'],
-                                                  result['Mean packet size'], filename)
-    else:
-        std_for, std_back, tot_var = get_variance(result['Mean forward packets'], 0, result['Mean packet size'],
-                                                  filename)
+    result['# forward packets'] = len(for_bytes)
+    result['# backward packets'] = len(back_bytes)
+    result['# forward total bytes'] = sum(for_bytes)
+    result['# backward total bytes'] = sum(back_bytes)
+    result['# Total packets'] = len(back_bytes) + len(for_bytes)
+    result['Mean packet size'] = (sum(back_bytes) + sum(for_bytes)) / (len(back_bytes) + len(for_bytes))
+    result['Minimum packet size'] = min(back_bytes) if min(back_bytes) < min(for_bytes) else min(for_bytes)
+    result['Maximum packet size'] = max(back_bytes) if max(back_bytes) > max(for_bytes) else max(for_bytes)
+    result['Minimum forward packet'] = min(for_bytes)
+    result['Minimum backward packet'] = min(back_bytes)
+    result['Maximum forward packet'] = max(for_bytes)
+    result['Maximum backward packet'] = max(back_bytes)
+    result['Mean forward packets'] = sum(for_bytes)/len(for_bytes)
+    if len(back_bytes) > 0:
+        result['Mean backward TTL value'] = mean(ttl)
+        result['Mean backward packets'] = mean(back_bytes)
 
-    if for_count > 1:
-        result['STD forward packets'] = sqrt(std_for / (for_count - 1))
-    if back_count > 1:
-        result['STD forward packets'] = sqrt(std_back / (back_count - 1))
+    if len(for_bytes) > 1:
+        result['STD forward packets'] = stdev(for_bytes)
+    if len(back_bytes) > 1:
+        result['STD forward packets'] = stdev(back_bytes)
     return result
 
 
@@ -142,11 +126,11 @@ def timing_features(filename, result):
     for_times, back_times = get_interarrival_times(filename)
     # print(back_times)
     if len(for_times) > 0:
-        result['Mean forward inter arrival time difference'] = sum(for_times) / len(for_times)
+        result['Mean forward inter arrival time difference'] = mean(for_times)
         result['Min forward inter arrival time difference'] = min(for_times)
         result['Max forward inter arrival time difference'] = max(for_times)
     if len(back_times) > 0:
-        result['Mean backward inter arrival time difference'] = sum(back_times) / len(back_times)
+        result['Mean backward inter arrival time difference'] = mean(back_times)
         result['Min backward inter arrival time difference'] = min(back_times)
         result['Max backward inter arrival time difference'] = max(back_times)
     if len(for_times) > 1:
@@ -175,9 +159,12 @@ def extract_pcaps(directory_name, label):
     for filename in os.listdir(directory_name):
         if filename.endswith('.pcap'):
             new_row = extract_pcap(os.path.join(directory_name, filename))
+            # skip empty connections
+            if not new_row:
+                continue
             new_row['Label'] = label
             df = df.append(new_row, ignore_index=True)
     df.to_csv(label + '.csv')
 
 
-#extract_pcaps('C:\\Users\\Scotty\\Desktop\\SplitCap_2-1\\normal', 'normal')
+extract_pcaps('attack_packet/ursnif', 'ursnif')
