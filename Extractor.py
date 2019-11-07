@@ -5,6 +5,7 @@ import os
 import pandas as pd
 from statistics import stdev
 from statistics import mean
+import arff
 
 
 def get_variance(for_mean, back_mean, tot_mean, filename):
@@ -69,27 +70,29 @@ def basic_features(filename):
     # Somethings broke
     if len(back_bytes) + len(for_bytes) <= 0:
         return result
-    result['# forward packets'] = len(for_bytes)
-    result['# backward packets'] = len(back_bytes)
-    result['# forward total bytes'] = sum(for_bytes)
-    result['# backward total bytes'] = sum(back_bytes)
-    result['# Total packets'] = len(back_bytes) + len(for_bytes)
-    result['Mean packet size'] = (sum(back_bytes) + sum(for_bytes)) / (len(back_bytes) + len(for_bytes))
-    result['Minimum packet size'] = min(back_bytes) if min(back_bytes) < min(for_bytes) else min(for_bytes)
-    result['Maximum packet size'] = max(back_bytes) if max(back_bytes) > max(for_bytes) else max(for_bytes)
-    result['Minimum forward packet'] = min(for_bytes)
-    result['Minimum backward packet'] = min(back_bytes)
-    result['Maximum forward packet'] = max(for_bytes)
-    result['Maximum backward packet'] = max(back_bytes)
-    result['Mean forward packets'] = sum(for_bytes)/len(for_bytes)
+    result['forward packets'.replace(' ', '_')] = len(for_bytes)
+    result['backward packets'.replace(' ', '_')] = len(back_bytes)
+    result['forward total bytes'.replace(' ', '_')] = sum(for_bytes)
+    result['backward total bytes'.replace(' ', '_')] = sum(back_bytes)
+    result['Total packets'.replace(' ', '_')] = len(back_bytes) + len(for_bytes)
+    result['Mean packet size'.replace(' ', '_')] = (sum(back_bytes) + sum(for_bytes)) / (len(back_bytes) + len(for_bytes))
+    result['Minimum packet size'.replace(' ', '_')] = min(back_bytes, default=1000) if min(back_bytes, default=1000) < min(for_bytes) \
+        else min(for_bytes)
+    result['Maximum packet size'.replace(' ', '_')] = max(back_bytes, default=0) if max(back_bytes, default=0) > max(for_bytes) \
+        else max(for_bytes)
+    result['Minimum forward packet'.replace(' ', '_')] = min(for_bytes)
+    result['Minimum backward packet'.replace(' ', '_')] = min(back_bytes, default=0)
+    result['Maximum forward packet'.replace(' ', '_')] = max(for_bytes)
+    result['Maximum backward packet'.replace(' ', '_')] = max(back_bytes, default=0)
+    result['Mean forward packets'.replace(' ', '_')] = sum(for_bytes)/len(for_bytes)
     if len(back_bytes) > 0:
-        result['Mean backward TTL value'] = mean(ttl)
-        result['Mean backward packets'] = mean(back_bytes)
+        result['Mean backward TTL value'.replace(' ', '_')] = mean(ttl)
+        result['Mean backward packets'.replace(' ', '_')] = mean(back_bytes)
 
     if len(for_bytes) > 1:
-        result['STD forward packets'] = stdev(for_bytes)
+        result['STD forward packets'.replace(' ', '_')] = stdev(for_bytes)
     if len(back_bytes) > 1:
-        result['STD forward packets'] = stdev(back_bytes)
+        result['STD backward packets'.replace(' ', '_')] = stdev(back_bytes)
     return result
 
 
@@ -126,17 +129,17 @@ def timing_features(filename, result):
     for_times, back_times = get_interarrival_times(filename)
     # print(back_times)
     if len(for_times) > 0:
-        result['Mean forward inter arrival time difference'] = mean(for_times)
-        result['Min forward inter arrival time difference'] = min(for_times)
-        result['Max forward inter arrival time difference'] = max(for_times)
+        result['Mean forward inter arrival time difference'.replace(' ', '_')] = mean(for_times)
+        result['Min forward inter arrival time difference'.replace(' ', '_')] = min(for_times)
+        result['Max forward inter arrival time difference'.replace(' ', '_')] = max(for_times)
     if len(back_times) > 0:
-        result['Mean backward inter arrival time difference'] = mean(back_times)
-        result['Min backward inter arrival time difference'] = min(back_times)
-        result['Max backward inter arrival time difference'] = max(back_times)
+        result['Mean backward inter arrival time difference'.replace(' ', '_')] = mean(back_times)
+        result['Min backward inter arrival time difference'.replace(' ', '_')] = min(back_times)
+        result['Max backward inter arrival time difference'.replace(' ', '_')] = max(back_times)
     if len(for_times) > 1:
-        result['STD forward inter arrival time difference'] = stdev(for_times)
+        result['STD forward inter arrival time difference'.replace(' ', '_')] = stdev(for_times)
     if len(back_times) > 1:
-        result['STD backward inter arrival time difference'] = stdev(back_times)
+        result['STD backward inter arrival time difference'.replace(' ', '_')] = stdev(back_times)
     return result
 
 
@@ -145,16 +148,20 @@ def extract_pcap(filename):
     return timing_features(filename, result)
 
 
-def extract_pcaps(directory_name, label):
-    feature_names = ['# forward packets', '# forward total bytes', 'Min forward inter arrival time difference',
+def extract_pcaps(directory_name, label, out_file):
+    feature_names = ['forward packets', 'forward total bytes', 'Min forward inter arrival time difference',
                      'Max forward inter arrival time difference', 'Mean forward inter arrival time difference',
                      'STD forward inter arrival time difference', 'Mean forward packets', 'STD forward packets',
-                     '# backward packets', '# backward total bytes',
+                     'backward packets', 'backward total bytes',
                      'Min backward inter arrival time difference', 'Max backward inter arrival time difference',
                      'Mean backward inter arrival time difference', 'STD backward inter arrival time difference',
-                     'Mean backward packets', 'STD backward packets', 'Mean backward TTL value', '# Total packets',
+                     'Mean backward packets', 'STD backward packets', 'Mean backward TTL value', 'Total packets',
                      'Minimum packet size', 'Maximum packet size', 'Mean packet size', 'Label']
-    df = pd.DataFrame(columns=feature_names)
+    correct_names =[]
+    for name in feature_names:
+        correct_names.append(name.replace(' ', '_'))
+    #print(correct_names)
+    df = pd.DataFrame(columns=correct_names)
 
     for filename in os.listdir(directory_name):
         if filename.endswith('.pcap'):
@@ -164,7 +171,11 @@ def extract_pcaps(directory_name, label):
                 continue
             new_row['Label'] = label
             df = df.append(new_row, ignore_index=True)
-    df.to_csv(label + '.csv')
+    arff.dump(out_file + '.arff'
+              , df.values
+              , relation='Test'
+              , names=df.columns)
+    df.to_csv(out_file + '.csv')
 
 
-extract_pcaps('attack_packet/ursnif', 'ursnif')
+extract_pcaps('C:\\Users\\Scotty\\Desktop\\SplitCap_2-1\\test2', 'normal', 'test2')
