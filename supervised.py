@@ -1,6 +1,6 @@
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import cross_validate
+
 
 def tester(filename):
     df = pd.read_csv(filename)
@@ -11,8 +11,6 @@ def tester(filename):
 
     clf = RandomForestClassifier()
     clf.fit(features, labels)
-    cv_results = cross_validate(clf, features, labels, cv=10)
-    #print(cv_results)
     feature_importances = pd.DataFrame(clf.feature_importances_,
                                        index=features.columns,
                                        columns=['importance']).sort_values('importance', ascending=False)
@@ -26,3 +24,4 @@ def tester(filename):
 
 
 print(tester('full.csv'))
+
