@@ -1,16 +1,24 @@
 import numpy
+import datetime
 from functools import partial
 from scapy.all import *
 from Extractor import *
+from supervised import train
 import pickle
+import sys
 
 connection_dict = dict()
 bad_features = ['class', 'Mean_backward_inter_arrival_time_difference', 'Mean_backward_TTL_value',
                 'Max_backward_inter_arrival_time_difference', 'STD_backward_inter_arrival_time_difference']
 
 
+def train_new_model(training_file, output):
+    model = train(training_file)
+    pickle.dump(model, open(output, 'wb'))
+
+
 # IDs are Host IP,Port and Dest IP,Port
-def get_id(pkt, host):
+def get_details(pkt, host):
     if pkt[IP].src == host:
         dest_ip = pkt[IP].dst
         dest_port = pkt[IP][TCP].dport
@@ -19,14 +27,20 @@ def get_id(pkt, host):
         dest_ip = pkt[IP].src
         dest_port = pkt[IP][TCP].sport
         host_port = pkt[IP][TCP].dport
-    conn_id = host + str(host_port) + dest_ip + str(dest_port)
-    if conn_id not in connection_dict:
-        connection_dict[conn_id] = []
+    conn_id = [host, str(host_port), dest_ip, str(dest_port)]
+    if ''.join(conn_id) not in connection_dict:
+        connection_dict[''.join(conn_id)] = []
     return conn_id
 
 
-def block(pkt):
-    print('Connection ID: ' + pkt + 'was blocked')
+def block(det):
+    file = open('firewall_log.txt', 'a')
+    file.write('%s: Host IP: %s was blocked\n' % (datetime.now(), det[2]))
+    file.close()
+    # Bad syscalls are bad but this should work, at least on non-Windows systems
+    if not sys.platform.startswith('win'):
+        cmd = "/sbin/iptables -A INPUT -s " + det[2] + " -j DROP"
+        subprocess.call(cmd, shell=True)
 
 
 def evaluate(vector, model_file):
@@ -53,19 +67,20 @@ def is_ended(pkt_list):
 def process_pkt(host: str, model_file: str, pkt):
     if TCP not in pkt:
         return
-    con_id = get_id(pkt, host)
+    details = get_details(pkt, host)
+    con_id = ''.join(details)
     connection_dict[con_id].append(pkt)
     if len(connection_dict[con_id]) % 30 == 0 or is_ended(connection_dict[con_id]):
-        ingest(con_id, model_file)
+        ingest(con_id, model_file, details)
     if is_ended(connection_dict[con_id]):
         del connection_dict[con_id]
 
 
-def ingest(con_id, model_file):
+def ingest(con_id, model_file, details):
     vector = extract_features(connection_dict[con_id])
     label = evaluate(vector, model_file)
     if label != 'normal':
-        block(con_id)
+        block(details)
 
 
 def packet_scanner(host, model_file):
@@ -81,15 +96,19 @@ def main(argv):
     host_ip = socket.gethostbyname(hostname)
     model_file = ''
     can_file = ''
+    train_file = ''
     live_flag = False
+    retrain_flag = False
     try:
-        opts, args = getopt.getopt(argv, "hlc:m:i:o:")
+        opts, args = getopt.getopt(argv, "hlc:m:i:t:o:")
     except getopt.GetoptError:
-        print('firewall.py -m <model_pkl> -c <canned_pcap> -i <host_ip>|-l (Live Traffic)')
+        print('Input Error')
         sys.exit(2)
     for opt, arg in opts:
         if opt == '-h':
-            print('Usage: firewall.py -m <model_pkl> -c <canned_pcap> -h <host_ip>|-l (Live Traffic)')
+            print('Usage: firewall.py -m <model_pkl>  -i <host_ip> -c <canned_pcap> (Canned Traffic)')
+            print('firewall.py -m <model_pkl>  -i <host_ip> -l (Live Traffic)')
+            print('firewall.py -t <training_data> -m <output_model> (Retrain Model)')
             sys.exit()
         elif opt == "-c":
             can_file = arg
@@ -99,8 +118,14 @@ def main(argv):
             live_flag = True
         elif opt == '-i':
             host_ip = arg
+        elif opt == 't':
+            retrain_flag = True
+            train_file = arg
+
     if live_flag:
         packet_scanner(host_ip, model_file)
+    elif retrain_flag:
+        train_new_model(train_file, model_file)
     else:
         canned_scanner(can_file, host_ip, model_file)
 
