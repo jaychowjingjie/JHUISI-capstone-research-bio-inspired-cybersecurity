@@ -6,29 +6,38 @@ import pandas as pd
 from statistics import stdev
 from statistics import mean
 import arff
+feature_names = ['forward packets', 'forward total bytes', 'Min forward inter arrival time difference',
+                 'Max forward inter arrival time difference', 'Mean forward inter arrival time difference',
+                 'STD forward inter arrival time difference', 'Mean forward packets', 'STD forward packets',
+                 'backward packets', 'backward total bytes',
+                 'Min backward inter arrival time difference', 'Max backward inter arrival time difference',
+                 'Mean backward inter arrival time difference', 'STD backward inter arrival time difference',
+                 'Mean backward packets', 'STD backward packets', 'Mean backward TTL value', 'Total packets',
+                 'Minimum packet size', 'Maximum packet size', 'Mean packet size', 'class']
+correct_names = []
+for name in feature_names:
+    correct_names.append(name.replace(' ', '_'))
 
 
-def get_variance(for_mean, back_mean, tot_mean, filename):
-    for_var, back_var, tot_var = 0, 0, 0
-    src = ''
+def dict_to_df(vector):
+    df = pd.DataFrame(columns=correct_names)
+    df = df.append(vector, ignore_index=True)
+    return df
+
+# takes a pcap file as input and returns a list of the raw packets
+def get_packets(filename):
+    pkt_list = list()
     for (pkt_data, pkt_metadata,) in RawPcapReader(filename):
-        ip_packet = get_ip(pkt_data)
-        if ip_packet is None:
-            continue
-        if tot_var == 0:
-            src = ip_packet.src
-        packet_len = len(ip_packet[TCP])
-        tot_var = (packet_len - tot_mean) ** 2
-        if ip_packet.src == src:
-            for_var = (packet_len - for_mean) ** 2
-        # Backward Packet Features
-        else:
-            back_var = (packet_len - back_mean) ** 2
-    return for_var, back_var, tot_var
+        pkt_list.append((pkt_data, pkt_metadata))
+    return pkt_list
 
 
+# extracts the IPv4 portion of a packet returns returns None if one doesn't exist
 def get_ip(pkt_data):
-    ether_pkt = Ether(pkt_data)
+    if pkt_data.name != 'Ethernet':
+        ether_pkt = Ether(pkt_data)
+    else:
+        ether_pkt = pkt_data
     if 'type' not in ether_pkt.fields:
         # LLC frames will have 'len' instead of 'type'.
         # We disregard those
@@ -45,28 +54,49 @@ def get_ip(pkt_data):
     return ip_pkt
 
 
-def basic_features(filename):
+# Extractor for basic features(size, # of packets, TTL values)
+def basic_features(pkt_list, file_flag=False):
     result = dict()
     for_bytes, back_bytes = [], []
     ttl = []
     src = ''
-    for (pkt_data, pkt_metadata,) in RawPcapReader(filename):
-        ip_packet = get_ip(pkt_data)
-        if ip_packet is None:
-            continue
-        # Set soucre and dst for forwards and backwards features
-        if len(for_bytes) == 0:
-            src = ip_packet.src
-        packet_len = len(ip_packet[TCP])
+    # Scapy reads files differently than live traffic
+    if file_flag is True:
+        for (pkt_data, pkt_metadata) in pkt_list:
+            ip_packet = get_ip(pkt_data)
+            if ip_packet is None:
+                continue
+            # Set source and dst for forwards and backwards features
+            if len(for_bytes) == 0:
+                src = ip_packet.src
+            packet_len = len(ip_packet[TCP])
 
-        # Forward packet features
-        if ip_packet.src == src:
-            for_bytes.append(packet_len)
+            # Forward packet features
+            if ip_packet.src == src:
+                for_bytes.append(packet_len)
 
-        # Backward Packet Features
-        else:
-            back_bytes.append(packet_len)
-            ttl.append(ip_packet.ttl)
+            # Backward Packet Features
+            else:
+                back_bytes.append(packet_len)
+                ttl.append(ip_packet.ttl)
+    else:
+        for pkt_data in pkt_list:
+            ip_packet = get_ip(pkt_data)
+            if ip_packet is None:
+                continue
+            # Set source and dst for forwards and backwards features
+            if len(for_bytes) == 0:
+                src = ip_packet.src
+            packet_len = len(ip_packet[TCP])
+
+            # Forward packet features
+            if ip_packet.src == src:
+                for_bytes.append(packet_len)
+
+            # Backward Packet Features
+            else:
+                back_bytes.append(packet_len)
+                ttl.append(ip_packet.ttl)
     # Somethings broke
     if len(back_bytes) + len(for_bytes) <= 0:
         return result
@@ -96,37 +126,63 @@ def basic_features(filename):
     return result
 
 
-def get_interarrival_times(filename):
+# Calculates inter-arrival times for each packet in each direction returns a list of times for each direction
+def get_interarrival_times(pkt_list, file_flag):
     timestamp, for_time, back_time = 0, 0, 0
-    tot_for_time, tot_back_time = [], []
+    for_times, back_times = [], []
     src = ''
     count = 0
-    for (pkt_data, pkt_metadata,) in RawPcapReader(filename):
-        ip_packet = get_ip(pkt_data)
-        if ip_packet is None:
-            continue
-        if timestamp == 0:
-            src = ip_packet.src
-        timestamp = pkt_metadata.sec + pkt_metadata.usec * 10 ** -6
-        if ip_packet.src == src:
-            if count == 0:
+    if file_flag is True:
+        for (pkt_data, pkt_metadata) in pkt_list:
+            ip_packet = get_ip(pkt_data)
+            if ip_packet is None:
+                continue
+            if timestamp == 0:
+                src = ip_packet.src
+            timestamp = pkt_metadata.sec + pkt_metadata.usec * 10 ** -6
+            if ip_packet.src == src:
+                if count == 0:
+                    for_time = timestamp
+                    continue
+                for_times.append(timestamp - for_time)
                 for_time = timestamp
-                continue
-            tot_for_time.append(timestamp - for_time)
-            for_time = timestamp
-        # Backward Packet Features
-        else:
-            if count == 1:
+            # Backward Packet Features
+            else:
+                if count == 1:
+                    back_time = timestamp
+                    continue
+                back_times.append(timestamp - back_time)
                 back_time = timestamp
+            count += 1
+    else:
+        for pkt_data in pkt_list:
+            ip_packet = get_ip(pkt_data)
+            if ip_packet is None:
                 continue
-            tot_back_time.append(timestamp - back_time)
-            back_time = timestamp
-        count += 1
-    return tot_for_time, tot_back_time
+            if timestamp == 0:
+                src = ip_packet.src
+            timestamp = pkt_data.time
+            if ip_packet.src == src:
+                if count == 0:
+                    for_time = timestamp
+                    continue
+                for_times.append(timestamp - for_time)
+                for_time = timestamp
+            # Backward Packet Features
+            else:
+                if count == 1:
+                    back_time = timestamp
+                    continue
+                back_times.append(timestamp - back_time)
+                back_time = timestamp
+            count += 1
+    return for_times, back_times
 
 
-def timing_features(filename, result):
-    for_times, back_times = get_interarrival_times(filename)
+# Actual calculation of timing features happens here
+def timing_features(pkt_list, file_flag=False):
+    result = dict()
+    for_times, back_times = get_interarrival_times(pkt_list, file_flag)
     # print(back_times)
     if len(for_times) > 0:
         result['Mean forward inter arrival time difference'.replace(' ', '_')] = mean(for_times)
@@ -143,33 +199,25 @@ def timing_features(filename, result):
     return result
 
 
-def extract_pcap(filename):
-    result = basic_features(filename)
-    return timing_features(filename, result)
+# given a list of packets will return the feature vector for a
+def extract_features(pkt_list, file_flag=False):
+    result = basic_features(pkt_list, file_flag)
+    result.update(timing_features(pkt_list, file_flag))
+    return result
+    # additional feature extracting functions can be called here just update on result
 
 
-def extract_pcaps(directory_name, label, out_file):
-    feature_names = ['forward packets', 'forward total bytes', 'Min forward inter arrival time difference',
-                     'Max forward inter arrival time difference', 'Mean forward inter arrival time difference',
-                     'STD forward inter arrival time difference', 'Mean forward packets', 'STD forward packets',
-                     'backward packets', 'backward total bytes',
-                     'Min backward inter arrival time difference', 'Max backward inter arrival time difference',
-                     'Mean backward inter arrival time difference', 'STD backward inter arrival time difference',
-                     'Mean backward packets', 'STD backward packets', 'Mean backward TTL value', 'Total packets',
-                     'Minimum packet size', 'Maximum packet size', 'Mean packet size', 'Label']
-    correct_names =[]
-    for name in feature_names:
-        correct_names.append(name.replace(' ', '_'))
-    #print(correct_names)
+def extract_pcap_directory(directory_name, label, out_file):
     df = pd.DataFrame(columns=correct_names)
 
     for filename in os.listdir(directory_name):
         if filename.endswith('.pcap'):
-            new_row = extract_pcap(os.path.join(directory_name, filename))
+            pkt_list = get_packets(os.path.join(directory_name, filename))
+            new_row = extract_features(pkt_list, file_flag=True)
             # skip empty connections
             if not new_row:
                 continue
-            new_row['Label'] = label
+            new_row['class'] = label
             df = df.append(new_row, ignore_index=True)
     arff.dump(out_file + '.arff'
               , df.values
@@ -178,4 +226,4 @@ def extract_pcaps(directory_name, label, out_file):
     df.to_csv(out_file + '.csv')
 
 
-extract_pcaps('C:\\Users\\Scotty\\Desktop\\SplitCap_2-1\\test2', 'normal', 'test2')
+#extract_pcap_directory('attack_packet/ursnif', 'test', 'time')
