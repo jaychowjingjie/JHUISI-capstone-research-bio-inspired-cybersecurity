@@ -7,6 +7,7 @@ from supervised import train
 import pickle
 import sys
 
+blocked_ips = []
 connection_dict = dict()
 bad_features = ['class', 'Mean_backward_inter_arrival_time_difference', 'Mean_backward_TTL_value',
                 'Max_backward_inter_arrival_time_difference', 'STD_backward_inter_arrival_time_difference']
@@ -34,20 +35,22 @@ def get_details(pkt, host):
 
 
 def block(det):
-    file = open('firewall_log.txt', 'a')
-    file.write('%s: Host IP: %s was blocked\n' % (datetime.now(), det[2]))
-    file.close()
-    # Bad syscalls are bad but this should work, at least on non-Windows systems
-    if not sys.platform.startswith('win'):
-        cmd = "/sbin/iptables -A INPUT -s " + det[2] + " -j DROP"
-        subprocess.call(cmd, shell=True)
+    if det[2] not in blocked_ips:
+        blocked_ips.append(det[2])
+        file = open('firewall_log.txt', 'a')
+        file.write('%s: Host IP: %s was blocked\n' % (datetime.now(), det[2]))
+        file.close()
+        # Bad syscalls are bad but this should work, at least on non-Windows systems
+        if not sys.platform.startswith('win'):
+            cmd = "/sbin/iptables -A INPUT -s " + det[2] + " -j DROP"
+            subprocess.call(cmd, shell=True)
 
 
 def evaluate(vector, model_file):
     vector = dict_to_df(vector)
     file = open(model_file, 'rb')
-    vector[:] = numpy.nan_to_num(vector)
     vector = vector.drop(bad_features, axis=1)
+    vector[:] = numpy.nan_to_num(vector)
     model = pickle.load(file)
     file.close()
     return model.predict(vector)
@@ -59,18 +62,20 @@ def is_ended(pkt_list):
     if pkt_list[-1][IP][TCP].flags.R:
         return True
     # Lazy check for 4-way session close
+    elif len(pkt_list) < 4:
+        return False
     else:
         last_4 = pkt_list[-4:]
         return last_4[0][IP][TCP].flags.F and last_4[2][IP][TCP].flags.F
 
 
-def process_pkt(host: str, model_file: str, pkt):
+def process_pkt(host, model_file, pkt):
     if TCP not in pkt:
         return
     details = get_details(pkt, host)
     con_id = ''.join(details)
     connection_dict[con_id].append(pkt)
-    if len(connection_dict[con_id]) % 30 == 0 or is_ended(connection_dict[con_id]):
+    if len(connection_dict[con_id]) % 10 == 0 or is_ended(connection_dict[con_id]):
         ingest(con_id, model_file, details)
     if is_ended(connection_dict[con_id]):
         del connection_dict[con_id]
@@ -79,7 +84,7 @@ def process_pkt(host: str, model_file: str, pkt):
 def ingest(con_id, model_file, details):
     vector = extract_features(connection_dict[con_id])
     label = evaluate(vector, model_file)
-    if label != 'normal':
+    if label == 'bad' or label == 1:
         block(details)
 
 
