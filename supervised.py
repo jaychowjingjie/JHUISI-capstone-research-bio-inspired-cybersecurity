@@ -2,19 +2,17 @@ import pandas as pd
 import pickle
 from sklearn.ensemble import RandomForestClassifier
 
-bad_features = ['id', 'class', 'Mean_backward_inter_arrival_time_difference', 'Mean_backward_TTL_value',
-                'Max_backward_inter_arrival_time_difference', 'STD_backward_inter_arrival_time_difference']
+bad_features = ['id', 'class']
 
 
-def train(training_set):
+def train(training_set, model_filename):
     df = pd.read_csv(training_set)
     labels = df['class']
-    # Remove
     features = df.drop(bad_features, axis=1)
 
-    clf = RandomForestClassifier()
+    clf = RandomForestClassifier(n_estimators=100, random_state=6)
     clf.fit(features, labels)
-    return clf
+    pickle.dump(clf, open(model_filename, 'wb'))
 
 
 def tester(model, test_set):
@@ -24,8 +22,19 @@ def tester(model, test_set):
     test = test.drop(bad_features, axis=1)
     print('Model Score: ' + str(clf.score(test, y)))
 
+
+# train('full2.csv', 'supervised_model2.pkl')
 '''
-#pickle.dump(tester('full.csv', 'bad_test.csv'), open('model.pkl', 'wb'))
+df1 = pd.read_csv('normal2.csv')
+df2 = pd.read_csv('hancitor.csv')
+df3 = pd.read_csv('ursnif.csv')
+df4 = pd.read_csv('trickbot.csv')
+dfs = [df1, df2, df3, df4]
+full = pd.concat(dfs, ignore_index=True)
+full.fillna(0, inplace=True)
+full.drop(['id'], axis=1, inplace=True)
+full.to_csv('full2.csv')
+
 file = open('model.pkl', 'rb')
 
 test = pickle.load(file)

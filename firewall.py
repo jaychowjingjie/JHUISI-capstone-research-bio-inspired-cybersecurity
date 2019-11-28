@@ -7,10 +7,11 @@ from supervised import train
 import pickle
 import sys
 
+unique_flows = set()
+blocked_connections = set()
 blocked_ips = []
-connection_dict = dict()
-bad_features = ['class', 'Mean_backward_inter_arrival_time_difference', 'Mean_backward_TTL_value',
-                'Max_backward_inter_arrival_time_difference', 'STD_backward_inter_arrival_time_difference']
+active_connections = dict()
+bad_features = ['class']
 
 
 def train_new_model(training_file, output):
@@ -29,12 +30,14 @@ def get_details(pkt, host):
         dest_port = pkt[IP][TCP].sport
         host_port = pkt[IP][TCP].dport
     conn_id = [host, str(host_port), dest_ip, str(dest_port)]
-    if ''.join(conn_id) not in connection_dict:
-        connection_dict[''.join(conn_id)] = []
+    if ''.join(conn_id) not in active_connections:
+        unique_flows.add(''.join(conn_id))
+        active_connections[''.join(conn_id)] = []
     return conn_id
 
 
 def block(det):
+    blocked_connections.add(''.join(det))
     if det[2] not in blocked_ips:
         blocked_ips.append(det[2])
         file = open('firewall_log.txt', 'a')
@@ -74,18 +77,24 @@ def process_pkt(host, model_file, pkt):
         return
     details = get_details(pkt, host)
     con_id = ''.join(details)
-    connection_dict[con_id].append(pkt)
-    if len(connection_dict[con_id]) % 10 == 0 or is_ended(connection_dict[con_id]):
+    active_connections[con_id].append(pkt)
+    if len(active_connections[con_id]) % 5 == 0 or is_ended(active_connections[con_id]):
         ingest(con_id, model_file, details)
-    if is_ended(connection_dict[con_id]):
-        del connection_dict[con_id]
+    if is_ended(active_connections[con_id]):
+        del active_connections[con_id]
 
 
 def ingest(con_id, model_file, details):
-    vector = extract_features(connection_dict[con_id])
+    vector = extract_features(active_connections[con_id])
     label = evaluate(vector, model_file)
-    if label == 'bad' or label == 1:
-        block(details)
+    #print(type(label))
+    if isinstance(label, str):
+        if label == 'bad':
+            block(details)
+    else:
+        label = list(label)
+        if label[0] == 1:
+            block(details)
 
 
 def packet_scanner(host, model_file):
@@ -94,6 +103,8 @@ def packet_scanner(host, model_file):
 
 def canned_scanner(filename, host, model_file):
     sniff(offline=filename, prn=partial(process_pkt, host, model_file))
+    print('Unique Connections: ' + str(len(unique_flows)))
+    print('Malicious Connections: ' + str(len(blocked_connections)))
 
 
 def main(argv):
@@ -136,4 +147,7 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    #main(sys.argv[1:])
+    canned_scanner('test2.pcap', '192.168.1.13', 'supervised_model2.pkl')
+    print(len(unique_flows))
+    print(len(blocked_connections))
